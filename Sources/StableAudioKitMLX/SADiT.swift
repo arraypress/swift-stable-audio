@@ -74,14 +74,6 @@ struct SADiT {
 
     // MARK: - Helpers
 
-    private func expoFeatures(_ t: MLXArray, dim: Int = 256, minF: Float = 0.5, maxF: Float = 10000) -> MLXArray {
-        let half = dim / 2
-        let ramp = MLXArray((0 ..< half).map { Float($0) / Float(half - 1) })     // linspace(0,1)
-        let freqs = exp(ramp * (log(maxF) - log(minF)) + log(minF))
-        let args = t.reshaped([-1, 1]) * freqs * (2 * Float.pi)
-        return concatenated([cos(args), sin(args)], axis: -1)
-    }
-
     private func conv1x1(_ x: MLXArray, _ weight: MLXArray) -> MLXArray {   // (Cout,Cin,1)
         let w2 = weight.reshaped([weight.dim(0), weight.dim(1)])
         let y = matmul(x.transposed(axes: [0, 2, 1]), w2.T)
@@ -95,7 +87,7 @@ struct SADiT {
         let B = x.dim(0), nMem = 64
         let ctx = mlp(ctxRaw, "cond_embed0", "cond_embed2", bias: false)
         var glob = mlp(globalRaw, "glob_embed0", "glob_embed2", bias: false)
-        glob = glob + mlp(expoFeatures(t), "t_embed0", "t_embed2", bias: true)
+        glob = glob + mlp(SAOps.expoFeatures(t), "t_embed0", "t_embed2", bias: true)
         let gc = mlp(glob, "gce0", "gce2", bias: true)
         let local = localRaw.transposed(axes: [0, 2, 1])                 // (B,T,257)
 

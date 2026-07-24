@@ -2,75 +2,117 @@
 //  MLXEngine.swift
 //  StableAudioKitMLX
 //
-//  On-device Stable Audio via MLX (Mac + iPhone GPU). Loads the MLX-converted
-//  weights, then runs the diffusion pipeline fully on-device:
+//  On-device Stable Audio via MLX (Mac + iPhone GPU). Loads the converted
+//  clean-keyed weights, builds the ported nets, and runs the full pipeline:
 //
-//      prompt ─▶ [Conditioner] ─▶ conds ─▶ [DiT ×N ping-pong] ─▶ [Decoder] ─▶ audio
+//      prompt ─▶ [T5Gemma] ─▶ conds ─▶ [DiT ×8 ping-pong] ─▶ [Decoder] ─▶ audio
+//
+//  The neural code is transcribed 1:1 from the MLX-Python port that was matched
+//  to PyTorch offline. Runtime validation of the Swift build needs an Xcode app
+//  (mlx-swift's Metal library only bundles in app builds, not `swift test`).
 //
 //  A `final class` (not an actor) because MLX graph objects are non-Sendable;
 //  `@unchecked Sendable` documents prepare-then-generate use.
-//
-//  Architecture reference: `stable_audio_tools` (PyTorch) + the MLX weight map
-//  of `mlx-community/stable-audio-3-small-sfx`. See MLX_ENGINE_PLAN.md.
 //
 
 import Foundation
 import MLX
 import StableAudioKit
 
-/// On-device text-to-audio via an MLX Stable Audio model.
+/// Supplies Gemma token ids for a prompt (fulfil with swift-transformers in the app).
+public protocol SATokenizer: Sendable {
+    /// Encode to token ids (BOS-prefixed, as the T5Gemma conditioner expects).
+    func encode(_ text: String) -> [Int]
+}
+
+/// On-device text-to-audio via the MLX Stable Audio 3 small-sfx model.
 public final class MLXEngine: AudioGenEngine, @unchecked Sendable {
 
-    /// The model this engine runs.
     public let model: StableAudioModel
+    /// Injected Gemma tokenizer (required before `generate`).
+    public var tokenizer: SATokenizer?
 
-    /// Loaded weights, keyed by tensor name (e.g. `model.model.transformer…`).
     private var weights: [String: MLXArray]?
+    private var pipeline: SAPipeline?
 
-    /// Create an engine for one of the curated ``StableAudioModel`` presets.
-    public init(_ model: StableAudioModel) {
+    private let promptLength = 256          // T5Gemma conditioner max_length
+    private let sampleRate = 44_100
+    private let downsample = 4_096
+
+    public init(_ model: StableAudioModel = .sa3SmallSFX, tokenizer: SATokenizer? = nil) {
         self.model = model
+        self.tokenizer = tokenizer
     }
 
-    public var isReady: Bool { weights != nil }
+    public var isReady: Bool { pipeline != nil }
 
     // MARK: - Preparation
 
-    /// Download (if needed) and load the model. **Download is not yet wired** —
-    /// use ``prepare(weightsDirectory:)`` with a local MLX checkpoint for now.
+    /// Not yet wired: download the converted weights from Hugging Face.
     public func prepare() async throws {
         throw AudioGenError.unavailable(
-            "MLXEngine.prepare(): Hugging Face download not wired yet — " +
-            "call prepare(weightsDirectory:) with a local MLX checkpoint."
-        )
+            "MLXEngine.prepare(): HF download not wired — call prepare(weightsDirectory:) " +
+            "with a directory containing the converted sa3 safetensors.")
     }
 
-    /// Load MLX-format weights from a local directory of `.safetensors` shards.
+    /// Load the converted clean-keyed `.safetensors` and build the pipeline.
     public func prepare(weightsDirectory: URL) throws {
         let shards = try FileManager.default
             .contentsOfDirectory(at: weightsDirectory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "safetensors" }
         guard !shards.isEmpty else {
-            throw AudioGenError.unavailable("no .safetensors found in \(weightsDirectory.path)")
+            throw AudioGenError.unavailable("no .safetensors in \(weightsDirectory.path)")
         }
         var all: [String: MLXArray] = [:]
-        for shard in shards {
-            for (key, value) in try loadArrays(url: shard) { all[key] = value }
-        }
+        for shard in shards { for (k, v) in try loadArrays(url: shard) { all[k] = v } }
         self.weights = all
+
+        func sub(_ prefix: String) -> [String: MLXArray] {
+            var d: [String: MLXArray] = [:]
+            for (k, v) in all where k.hasPrefix(prefix) { d[String(k.dropFirst(prefix.count))] = v }
+            return d
+        }
+        guard let pad = all["padding_embedding"], let nw = all["num_w"], let nb = all["num_b"] else {
+            throw AudioGenError.unavailable("weights missing conditioning tensors")
+        }
+        self.pipeline = SAPipeline(
+            t5: SAT5Gemma(w: sub("t5.")),
+            dit: SADiT(w: sub("dit.")),
+            decoder: SADecoder(w: sub("dec.")),
+            paddingEmbedding: pad, numberWeight: nw, numberBias: nb)
     }
 
     // MARK: - Generation
 
     public func generate(prompt: String, options: GenerationOptions) async throws -> GeneratedAudio {
-        guard let weights else { throw AudioGenError.notReady }
-        let (steps, cfg, seconds) = options.resolved(for: model)
-        _ = (weights, steps, cfg, seconds)   // wired in the forward-pass work
+        guard let pipeline else { throw AudioGenError.notReady }
+        guard let tokenizer else { throw AudioGenError.unavailable("set MLXEngine.tokenizer (a Gemma tokenizer)") }
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AudioGenError.invalidInput("empty prompt")
+        }
 
-        // Pipeline (see PingPongSampler + the DiT/Conditioner/Decoder ports):
-        //   1. cond = Conditioner(weights).encode(prompt, seconds)
-        //   2. latent = PingPongSampler(steps, cfg).sample(dit, cond, sampleSize)
-        //   3. audio  = Decoder(weights).decode(latent)
-        throw AudioGenError.unavailable("MLX forward pass not yet implemented (see MLX_ENGINE_PLAN.md)")
+        // Tokenize -> padded ids + mask (max_length 256).
+        var ids = tokenizer.encode(prompt)
+        if ids.count > promptLength { ids = Array(ids.prefix(promptLength)) }
+        let valid = ids.count
+        let idsPadded = ids + Array(repeating: 0, count: promptLength - valid)
+        let mask = (0 ..< promptLength).map { Int32($0 < valid ? 1 : 0) }
+        let idsMLX = MLXArray(idsPadded.map { Int32($0) }).reshaped([1, promptLength])
+        let maskMLX = MLXArray(mask).reshaped([1, promptLength])
+
+        // Latent length: even number of frames for the requested duration.
+        let seconds = Float(min(max(options.seconds, 1), model.maxSeconds))
+        var frames = Int((seconds * Float(sampleRate) / Float(downsample)).rounded())
+        frames = max(2, frames + (frames & 1))          // round up to even
+
+        let audio = pipeline.generate(
+            ids: idsMLX, mask: maskMLX, seconds: seconds,
+            frames: frames, seed: UInt64(max(0, options.seed ?? 0)))
+        eval(audio)
+
+        // (1, 2, N) -> interleaved [Float].
+        let N = audio.dim(2)
+        let interleaved = audio[0].transposed(axes: [1, 0]).reshaped([N * 2]).asArray(Float.self)
+        return GeneratedAudio(samples: interleaved, sampleRate: sampleRate, channelCount: 2)
     }
 }

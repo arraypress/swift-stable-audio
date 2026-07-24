@@ -84,4 +84,14 @@ enum SAOps {
     static func mergeHeads(_ t: MLXArray, _ B: Int, _ n: Int, _ H: Int, _ D: Int) -> MLXArray {
         t.transposed(axes: [0, 2, 1, 3]).reshaped([B, n, H * D])
     }
+
+    /// Exponential Fourier features: scalar batch `(B,)` → `(B, dim)`. Used by
+    /// both the DiT timestep embedding and the NumberConditioner.
+    static func expoFeatures(_ t: MLXArray, dim: Int = 256, minF: Float = 0.5, maxF: Float = 10000) -> MLXArray {
+        let half = dim / 2
+        let ramp = MLXArray((0 ..< half).map { Float($0) / Float(half - 1) })   // linspace(0,1)
+        let freqs = exp(ramp * (log(maxF) - log(minF)) + log(minF))
+        let args = t.reshaped([-1, 1]) * freqs * (2 * Float.pi)
+        return concatenated([cos(args), sin(args)], axis: -1)
+    }
 }
