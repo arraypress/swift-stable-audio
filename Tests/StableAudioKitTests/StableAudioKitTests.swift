@@ -9,10 +9,12 @@ import Foundation
 
 // MARK: - Model registry
 
-@Test func registryHasAllModels() {
-    #expect(StableAudioModel.all.count == 5)
+@Test func registryIsTheSA3Family() {
+    #expect(StableAudioModel.all.count == 3)
     let ids = Set(StableAudioModel.all.map(\.id))
-    #expect(ids == ["open-small", "sa3-small-sfx", "sa3-small-music", "sa3-medium", "open-1.0"])
+    #expect(ids == ["sa3-small-sfx", "sa3-small-music", "sa3-medium"])
+    // legacy Open-series exist but are not in the on-device set
+    #expect(!StableAudioModel.all.contains(.legacyOpenSmall))
 }
 
 @Test func sa3SmallSFXMetadata() {
@@ -26,8 +28,8 @@ import Foundation
     #expect(m.runsOnMobile)
 }
 
-@Test func open1_0IsHeavyMacTier() {
-    let m = StableAudioModel.open1_0
+@Test func legacyOpen1_0IsHeavyMacTier() {
+    let m = StableAudioModel.legacyOpen1_0
     #expect(!m.runsOnMobile)
     #expect(m.sampler == .dpmppSDE)
     #expect(m.defaultSteps == 100)
@@ -49,8 +51,8 @@ import Foundation
 }
 
 @Test func optionsCapSecondsToModelMax() {
-    let r = GenerationOptions(seconds: 999).resolved(for: .openSmall)
-    #expect(r.seconds == 12)          // openSmall maxSeconds
+    let r = GenerationOptions(seconds: 999).resolved(for: .legacyOpenSmall)
+    #expect(r.seconds == 12)          // legacyOpenSmall maxSeconds
 }
 
 @Test func optionsOverrideDefaults() {
