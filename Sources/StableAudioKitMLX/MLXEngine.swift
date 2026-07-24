@@ -74,6 +74,24 @@ public final class MLXEngine: AudioGenEngine, @unchecked Sendable {
     private func loadAndBuild(_ shards: [URL]) throws {
         var all: [String: MLXArray] = [:]
         for shard in shards { for (k, v) in try loadArrays(url: shard) { all[k] = v } }
+
+        // If the file is quantized (small download for iPhone), dequantize to
+        // fp16 at load so the nets run unchanged. `dequantized` is lossless
+        // vs the quantized weights; 8-bit is near-lossless vs fp32.
+        if let bitsArr = all["quant.bits"], let grpArr = all["quant.group"] {
+            let bits = bitsArr.asArray(Int32.self)[0]
+            let group = grpArr.asArray(Int32.self)[0]
+            var out: [String: MLXArray] = [:]
+            for (k, v) in all {
+                if k.hasSuffix(".scales") || k.hasSuffix(".biases") || k.hasPrefix("quant.") { continue }
+                if let s = all[k + ".scales"], let b = all[k + ".biases"] {
+                    out[k] = dequantized(v, scales: s, biases: b, groupSize: Int(group), bits: Int(bits)).asType(.float16)
+                } else {
+                    out[k] = v.asType(.float16)
+                }
+            }
+            all = out
+        }
         self.weights = all
 
         func sub(_ prefix: String) -> [String: MLXArray] {
