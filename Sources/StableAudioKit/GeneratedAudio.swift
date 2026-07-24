@@ -35,6 +35,66 @@ public struct GeneratedAudio: Sendable, Equatable {
     }
 }
 
+// MARK: - Post-processing (fades, seamless loop)
+
+extension GeneratedAudio {
+
+    /// Drop the last `ms` milliseconds — Stable Audio appends a brief tone/"horn"
+    /// artifact after the content ends; trimming removes it.
+    public func trimmingEnd(ms: Double) -> GeneratedAudio {
+        let ch = channelCount
+        guard ch > 0 else { return self }
+        let drop = min(Int(ms / 1000 * Double(sampleRate)), frameCount)
+        let keep = max(0, frameCount - drop) * ch
+        return GeneratedAudio(samples: Array(samples[0 ..< keep]), sampleRate: sampleRate, channelCount: ch)
+    }
+
+    /// Linear fade-in / fade-out (milliseconds) — removes the boundary click or
+    /// end "beep" that raw generated clips have. Applied by default on output.
+    public func faded(inMs: Double = 20, outMs: Double = 120) -> GeneratedAudio {
+        guard channelCount > 0, frameCount > 0 else { return self }
+        var s = samples
+        let ch = channelCount
+        let fin = max(0, min(Int(inMs / 1000 * Double(sampleRate)), frameCount / 2))
+        let fout = max(0, min(Int(outMs / 1000 * Double(sampleRate)), frameCount / 2))
+        for f in 0 ..< fin {
+            let g = Float(f) / Float(fin)
+            for c in 0 ..< ch { s[f * ch + c] *= g }
+        }
+        for f in 0 ..< fout {
+            let g = Float(f) / Float(fout)
+            let idx = frameCount - 1 - f
+            for c in 0 ..< ch { s[idx * ch + c] *= g }
+        }
+        return GeneratedAudio(samples: s, sampleRate: sampleRate, channelCount: ch)
+    }
+
+    /// Turn the clip into a **seamless loop** by equal-gain crossfading the tail
+    /// back into the head. The returned clip is `crossfadeMs` shorter and loops
+    /// with no click. Best for steady content (rain, wind, fire, drones, pads).
+    public func seamlessLoop(crossfadeMs: Double = 250) -> GeneratedAudio {
+        let ch = channelCount
+        guard ch > 0, frameCount > 4 else { return self }
+        let xf = max(1, min(Int(crossfadeMs / 1000 * Double(sampleRate)), frameCount / 3))
+        let outLen = frameCount - xf
+        var s = [Float](repeating: 0, count: outLen * ch)
+        for f in 0 ..< outLen {
+            for c in 0 ..< ch { s[f * ch + c] = samples[f * ch + c] }
+        }
+        // First `xf` samples blend the head (fading in) with the removed tail
+        // (fading out), so the wrap point outLen-1 -> 0 is continuous.
+        for i in 0 ..< xf {
+            let g = Float(i) / Float(xf)
+            for c in 0 ..< ch {
+                let head = samples[i * ch + c]
+                let tail = samples[(outLen + i) * ch + c]
+                s[i * ch + c] = head * g + tail * (1 - g)
+            }
+        }
+        return GeneratedAudio(samples: s, sampleRate: sampleRate, channelCount: ch)
+    }
+}
+
 // MARK: - WAV (PCM 16-bit) encode / decode
 
 extension GeneratedAudio {

@@ -140,6 +140,9 @@ public final class MLXEngine: AudioGenEngine, @unchecked Sendable {
         // (1, 2, N) -> interleaved [Float].
         let N = audio.dim(2)
         let interleaved = audio[0].transposed(axes: [1, 0]).reshaped([N * 2]).asArray(Float.self)
-        return GeneratedAudio(samples: interleaved, sampleRate: sampleRate, channelCount: 2)
+        // Trim the model's end-of-clip tone artifact, then fade (or make a loop).
+        let clean = GeneratedAudio(samples: interleaved, sampleRate: sampleRate, channelCount: 2)
+            .trimmingEnd(ms: 200)
+        return options.loop ? clean.seamlessLoop() : clean.faded()
     }
 }

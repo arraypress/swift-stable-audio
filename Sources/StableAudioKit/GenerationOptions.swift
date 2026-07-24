@@ -26,18 +26,24 @@ public struct GenerationOptions: Sendable, Equatable {
     /// Optional negative prompt (things to steer away from).
     public var negativePrompt: String?
 
+    /// Produce a seamless loop (crossfades the tail into the head). Best for
+    /// steady content — rain, wind, fire, drones, pads.
+    public var loop: Bool
+
     public init(
         seconds: Double = 10,
         steps: Int? = nil,
         cfgScale: Double? = nil,
         seed: Int? = nil,
-        negativePrompt: String? = nil
+        negativePrompt: String? = nil,
+        loop: Bool = false
     ) {
         self.seconds = seconds
         self.steps = steps
         self.cfgScale = cfgScale
         self.seed = seed
         self.negativePrompt = negativePrompt
+        self.loop = loop
     }
 
     /// Resolve the effective parameters against a model's defaults and limits.

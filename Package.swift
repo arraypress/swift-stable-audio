@@ -13,6 +13,8 @@ let package = Package(
         .library(name: "StableAudioKit", targets: ["StableAudioKit"]),
         // On-device Stable Audio via MLX (Mac + iPhone GPU) — opt-in.
         .library(name: "StableAudioKitMLX", targets: ["StableAudioKitMLX"]),
+        // Gemma tokenizer (swift-transformers) — opt-in.
+        .library(name: "StableAudioKitGemma", targets: ["StableAudioKitGemma"]),
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.31.6")),

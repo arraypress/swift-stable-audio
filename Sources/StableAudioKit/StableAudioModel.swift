@@ -110,11 +110,12 @@ public struct StableAudioModel: Sendable, Equatable {
         runsOnMobile: true, defaultSteps: 8, defaultCFG: 1.0, sampler: .pingpong)
 
     /// Stable Audio 3 medium — the top open tier; same family at larger dims
-    /// (embed 1536 / depth 24 / 24 heads, head_dim 64). Mac-class (heavy).
+    /// (embed 1536 / depth 24 / 24 heads). Trained up to ~380s (6.3 min), though
+    /// long clips are heavy with the current O(seq²) decoder. Mac-class.
     public static let sa3Medium = StableAudioModel(
         id: "sa3-medium", repoID: "stabilityai/stable-audio-3-medium",
         displayName: "Stable Audio 3 Medium", kind: .general,
-        maxSeconds: 120, approximateSizeMB: 10_400, license: community,
+        maxSeconds: 380, approximateSizeMB: 10_400, license: community,
         runsOnMobile: false, defaultSteps: 8, defaultCFG: 1.0, sampler: .pingpong)
 
     /// The curated on-device family (Stable Audio 3). One codebase.
