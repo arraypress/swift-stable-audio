@@ -17,13 +17,16 @@ public struct SADiT {
     private let embedDim: Int        // 1024 (small) / 1536 (medium)
     private let numHeads: Int        // embedDim / 64
     private let depth: Int           // 20 (small) / 24 (medium)
+    private let differential: Bool   // false (small) / true (medium)
     private let headDim = 64
 
     /// Infers dims from the weights so small and medium share one implementation.
     public init(w: [String: MLXArray]) {
         self.w = w
-        self.embedDim = w["project_in.w"]!.dim(0)
-        self.numHeads = w["project_in.w"]!.dim(0) / 64
+        let e = w["project_in.w"]!.dim(0)
+        self.embedDim = e
+        self.numHeads = e / 64
+        self.differential = (w["L0.sa_qkv.w"]!.dim(0) / e == 5)   // 3-way vs 5-way qkv
         var d = 0
         while w["L\(d).ssg"] != nil { d += 1 }
         self.depth = d
@@ -42,25 +45,26 @@ public struct SADiT {
 
     private func selfAttn(_ x: MLXArray, _ p: String, _ freqs: MLXArray) -> MLXArray {
         let B = x.dim(0), n = x.dim(1), H = numHeads, D = headDim
-        let s = split(SAOps.linear(x, W(p + "sa_qkv.w")), parts: 3, axis: -1)
-        var q = SAOps.toHeads(s[0], B, n, H, D)
-        var k = SAOps.toHeads(s[1], B, n, H, D)
-        let v = SAOps.toHeads(s[2], B, n, H, D)
-        q = SAOps.rmsNorm(q, W(p + "sa_qn"), eps: 1e-6)
-        k = SAOps.rmsNorm(k, W(p + "sa_kn"), eps: 1e-6)
-        q = SAOps.applyRopeHalf(q, freqs); k = SAOps.applyRopeHalf(k, freqs)
-        return SAOps.linear(SAOps.mergeHeads(SAOps.sdpa(q, k, v), B, n, H, D), W(p + "sa_out.w"))
+        func hd(_ t: MLXArray) -> MLXArray { SAOps.toHeads(t, B, n, H, D) }
+        func qn(_ t: MLXArray) -> MLXArray { SAOps.applyRopeHalf(SAOps.rmsNorm(t, W(p + "sa_qn"), eps: 1e-6), freqs) }
+        func kn(_ t: MLXArray) -> MLXArray { SAOps.applyRopeHalf(SAOps.rmsNorm(t, W(p + "sa_kn"), eps: 1e-6), freqs) }
+        let s = split(SAOps.linear(x, W(p + "sa_qkv.w")), parts: differential ? 5 : 3, axis: -1)
+        let v = hd(s[2])
+        var out = SAOps.sdpa(qn(hd(s[0])), kn(hd(s[1])), v)
+        if differential { out = out - SAOps.sdpa(qn(hd(s[3])), kn(hd(s[4])), v) }
+        return SAOps.linear(SAOps.mergeHeads(out, B, n, H, D), W(p + "sa_out.w"))
     }
 
     private func crossAttn(_ x: MLXArray, _ ctx: MLXArray, _ p: String) -> MLXArray {
         let B = x.dim(0), n = x.dim(1), M = ctx.dim(1), H = numHeads, D = headDim
-        var q = SAOps.toHeads(SAOps.linear(x, W(p + "ca_q.w")), B, n, H, D)
-        let kv = split(SAOps.linear(ctx, W(p + "ca_kv.w")), parts: 2, axis: -1)
-        var k = SAOps.toHeads(kv[0], B, M, H, D)
-        let v = SAOps.toHeads(kv[1], B, M, H, D)
-        q = SAOps.rmsNorm(q, W(p + "ca_qn"), eps: 1e-6)
-        k = SAOps.rmsNorm(k, W(p + "ca_kn"), eps: 1e-6)
-        return SAOps.linear(SAOps.mergeHeads(SAOps.sdpa(q, k, v), B, n, H, D), W(p + "ca_out.w"))
+        func qn(_ t: MLXArray) -> MLXArray { SAOps.rmsNorm(SAOps.toHeads(t, B, n, H, D), W(p + "ca_qn"), eps: 1e-6) }
+        func kn(_ t: MLXArray) -> MLXArray { SAOps.rmsNorm(SAOps.toHeads(t, B, M, H, D), W(p + "ca_kn"), eps: 1e-6) }
+        let qs = split(SAOps.linear(x, W(p + "ca_q.w")), parts: differential ? 2 : 1, axis: -1)
+        let kv = split(SAOps.linear(ctx, W(p + "ca_kv.w")), parts: differential ? 3 : 2, axis: -1)
+        let v = SAOps.toHeads(kv[differential ? 2 : 1], B, M, H, D)
+        var out = SAOps.sdpa(qn(qs[0]), kn(kv[0]), v)   // cross-attn has no RoPE
+        if differential { out = out - SAOps.sdpa(qn(qs[1]), kn(kv[1]), v) }
+        return SAOps.linear(SAOps.mergeHeads(out, B, n, H, D), W(p + "ca_out.w"))
     }
 
     private func feedForward(_ x: MLXArray, _ p: String) -> MLXArray {
