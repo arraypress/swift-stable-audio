@@ -16,6 +16,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.31.6")),
+        .package(url: "https://github.com/huggingface/swift-transformers.git", .upToNextMajor(from: "1.1.6")),
     ],
     targets: [
         .target(
@@ -50,6 +51,26 @@ let package = Package(
             dependencies: [
                 "StableAudioKit",
                 "StableAudioKitMLX",
+                .product(name: "MLX", package: "mlx-swift"),
+            ]
+        ),
+        // Gemma tokenizer (swift-transformers) conforming to SATokenizer — opt-in.
+        .target(
+            name: "StableAudioKitGemma",
+            dependencies: [
+                "StableAudioKitMLX",
+                .product(name: "Tokenizers", package: "swift-transformers"),
+            ]
+        ),
+        .executableTarget(
+            name: "sa-tokenize",
+            dependencies: ["StableAudioKitGemma"]
+        ),
+        // Real text -> audio: Gemma tokenizer + MLXEngine, any typed prompt.
+        .executableTarget(
+            name: "sa-tts",
+            dependencies: [
+                "StableAudioKit", "StableAudioKitMLX", "StableAudioKitGemma",
                 .product(name: "MLX", package: "mlx-swift"),
             ]
         ),
