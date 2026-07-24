@@ -2,6 +2,17 @@
 
 The on-device engine for `StableAudioKit`, backed by **MLX** (Mac + iPhone GPU). This is the real work behind the library; everything here is **validated in Python** — what remains is the MLX-Swift inference.
 
+## Status
+- ✅ **`StableAudioKitMLX` target set up** — depends on `mlx-swift` 0.31.6 (MLX/MLXNN/MLXRandom); compiles.
+- ✅ **`MLXEngine`** conforms to `AudioGenEngine`, loads `.safetensors` shards into `[String: MLXArray]` via `prepare(weightsDirectory:)`.
+- 🔜 **Hugging Face download** in `prepare()` (gated → token).
+- 🔜 **Forward passes** — Conditioner (T5Gemma), DiT (20-layer differential-attn), Autoencoder decoder, ping-pong sampler. Port from `stable_audio_tools` (PyTorch) using the MLX weight map below. Validate each stage numerically against the Python run.
+
+### Weight namespaces (from `mlx-community/stable-audio-3-small-sfx`, 682 tensors)
+- `model.model.transformer.layers.{0..19}.` — DiT: `self_attn.{to_qkv,to_out,q_norm,k_norm}`, `cross_attn.{to_q,to_kv,to_out,q_norm,k_norm,cross_attend_norm}`, `ff.ff.*`, `pre_norm`, `ff_norm`, `to_local_embed`
+- `pretransform.model.{encoder,decoder}.layers.*.transformers.*.` — autoencoder (transformer-based)
+- config: `latent_dim 256`, `transformer_depths [6]`, `dim_heads 64`, `dyt true`, `differential true`, `variable_stride`, `chunk_size 32`, `model_type stable_audio_3`
+
 ## Why MLX (not LiteRT)
 - One runtime across the ecosystem (`swift-tts`, `swift-llm` already use MLX).
 - Stable Audio 3 already has community MLX **weight** ports (`mlx-community/stable-audio-3-small-sfx`, `aufklarer/Stable-Audio-3-DiT-*-MLX-*bit`).
