@@ -10,7 +10,7 @@ import MLX
 import StableAudioKitMLX
 
 let args = CommandLine.arguments
-guard args.count == 3 else { fatalError("usage: sa-validate <weights> <fixtures>") }
+guard args.count >= 3 else { fatalError("usage: sa-validate <weights> <fixtures> [medWeights] [medDecFix]") }
 
 let weights = try loadArrays(url: URL(fileURLWithPath: args[1]))
 let fx = try loadArrays(url: URL(fileURLWithPath: args[2]))
@@ -41,5 +41,13 @@ report("dit", ditOut, fx["dit_output"]!)
 // T5Gemma
 let t5Out = SAT5Gemma(w: sub("t5.", weights)).encode(fx["t5_ids"]!, fx["t5_mask"]!)
 report("t5gemma", t5Out, fx["t5_ref"]!)
+
+// Optional: medium decoder (args[3]=medium weights, args[4]=medium dec fixtures)
+if CommandLine.arguments.count >= 5 {
+    let mw = try loadArrays(url: URL(fileURLWithPath: CommandLine.arguments[3]))
+    let mf = try loadArrays(url: URL(fileURLWithPath: CommandLine.arguments[4]))
+    let mOut = SADecoder(w: sub("dec.", mw)).decode(mf["dec_latent"]!)
+    report("dec-med", mOut, mf["dec_ref_audio"]!)
+}
 
 print("\ndone.")
