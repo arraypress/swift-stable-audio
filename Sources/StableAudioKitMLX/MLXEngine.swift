@@ -55,7 +55,12 @@ public final class MLXEngine: AudioGenEngine, @unchecked Sendable {
             "with a directory containing the converted sa3 safetensors.")
     }
 
-    /// Load the converted clean-keyed `.safetensors` and build the pipeline.
+    /// Load a single converted clean-keyed `.safetensors` and build the pipeline.
+    public func prepare(weightsFile: URL) throws {
+        try loadAndBuild([weightsFile])
+    }
+
+    /// Load all `.safetensors` in a directory and build the pipeline.
     public func prepare(weightsDirectory: URL) throws {
         let shards = try FileManager.default
             .contentsOfDirectory(at: weightsDirectory, includingPropertiesForKeys: nil)
@@ -63,6 +68,10 @@ public final class MLXEngine: AudioGenEngine, @unchecked Sendable {
         guard !shards.isEmpty else {
             throw AudioGenError.unavailable("no .safetensors in \(weightsDirectory.path)")
         }
+        try loadAndBuild(shards)
+    }
+
+    private func loadAndBuild(_ shards: [URL]) throws {
         var all: [String: MLXArray] = [:]
         for shard in shards { for (k, v) in try loadArrays(url: shard) { all[k] = v } }
         self.weights = all
