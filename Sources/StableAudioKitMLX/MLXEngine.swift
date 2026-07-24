@@ -127,9 +127,13 @@ public final class MLXEngine: AudioGenEngine, @unchecked Sendable {
         let idsMLX = MLXArray(idsPadded.map { Int32($0) }).reshaped([1, promptLength])
         let maskMLX = MLXArray(mask).reshaped([1, promptLength])
 
-        // Latent length: even number of frames for the requested duration.
+        // Latent length. Like the reference pipeline, we render a few seconds
+        // MORE than requested and crop back — the model puts a tone artifact on
+        // its final frame, so generating margin frames pushes that artifact into
+        // the discarded tail instead of the audible clip end.
         let seconds = Float(min(max(options.seconds, 1), model.maxSeconds))
-        var frames = Int((seconds * Float(sampleRate) / Float(downsample)).rounded())
+        let margin: Float = 3
+        var frames = Int(((seconds + margin) * Float(sampleRate) / Float(downsample)).rounded())
         frames = max(2, frames + (frames & 1))          // round up to even
 
         let audio = pipeline.generate(
@@ -137,12 +141,12 @@ public final class MLXEngine: AudioGenEngine, @unchecked Sendable {
             frames: frames, seed: UInt64(max(0, options.seed ?? 0)))
         eval(audio)
 
-        // (1, 2, N) -> interleaved [Float].
-        let N = audio.dim(2)
-        let interleaved = audio[0].transposed(axes: [1, 0]).reshaped([N * 2]).asArray(Float.self)
-        // Trim the model's end-of-clip tone artifact, then fade (or make a loop).
+        // (1, 2, Nfull) -> crop to the requested duration -> interleaved [Float].
+        let keep = min(audio.dim(2), Int((seconds * Float(sampleRate)).rounded()))
+        let stereoNT = audio[0].transposed(axes: [1, 0])[0 ..< keep]   // (keep, 2)
+        let interleaved = stereoNT.reshaped([keep * 2]).asArray(Float.self)
+        // Tiny de-click fade only; the end-tone lives in the cropped-off tail.
         let clean = GeneratedAudio(samples: interleaved, sampleRate: sampleRate, channelCount: 2)
-            .trimmingEnd(ms: 200)
-        return options.loop ? clean.seamlessLoop() : clean.faded()
+        return options.loop ? clean.seamlessLoop() : clean.faded(inMs: 5, outMs: 8)
     }
 }
