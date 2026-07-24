@@ -2,8 +2,8 @@
 //  SADiT.swift
 //  StableAudioKitMLX
 //
-//  The Stable Audio 3 Diffusion Transformer (20 layers), transcribed 1:1 from
-//  the validated MLX-Python port (`mlx_dit.py`, matched to PyTorch at 1.14e-4).
+//  The Stable Audio 3 Diffusion Transformer (dims inferred from weights:
+//  small 1024/20/16, medium 1536/24/24). Validated vs PyTorch at 1.14e-4.
 //  AdaLN self-attention (RMS-qk + RoPE) + cross-attention to text + per-frame
 //  local conditioning + timestep Fourier features + memory tokens.
 //
@@ -14,7 +14,20 @@ import MLX
 public struct SADiT {
 
     let w: [String: MLXArray]
-    public init(w: [String: MLXArray]) { self.w = w }
+    private let embedDim: Int        // 1024 (small) / 1536 (medium)
+    private let numHeads: Int        // embedDim / 64
+    private let depth: Int           // 20 (small) / 24 (medium)
+    private let headDim = 64
+
+    /// Infers dims from the weights so small and medium share one implementation.
+    public init(w: [String: MLXArray]) {
+        self.w = w
+        self.embedDim = w["project_in.w"]!.dim(0)
+        self.numHeads = w["project_in.w"]!.dim(0) / 64
+        var d = 0
+        while w["L\(d).ssg"] != nil { d += 1 }
+        self.depth = d
+    }
     private func W(_ k: String) -> MLXArray { w[k]! }
 
     private func lin(_ x: MLXArray, _ p: String, bias: Bool) -> MLXArray {
@@ -28,7 +41,7 @@ public struct SADiT {
     // MARK: - Attention
 
     private func selfAttn(_ x: MLXArray, _ p: String, _ freqs: MLXArray) -> MLXArray {
-        let B = x.dim(0), n = x.dim(1), H = 16, D = 64
+        let B = x.dim(0), n = x.dim(1), H = numHeads, D = headDim
         let s = split(SAOps.linear(x, W(p + "sa_qkv.w")), parts: 3, axis: -1)
         var q = SAOps.toHeads(s[0], B, n, H, D)
         var k = SAOps.toHeads(s[1], B, n, H, D)
@@ -40,7 +53,7 @@ public struct SADiT {
     }
 
     private func crossAttn(_ x: MLXArray, _ ctx: MLXArray, _ p: String) -> MLXArray {
-        let B = x.dim(0), n = x.dim(1), M = ctx.dim(1), H = 16, D = 64
+        let B = x.dim(0), n = x.dim(1), M = ctx.dim(1), H = numHeads, D = headDim
         var q = SAOps.toHeads(SAOps.linear(x, W(p + "ca_q.w")), B, n, H, D)
         let kv = split(SAOps.linear(ctx, W(p + "ca_kv.w")), parts: 2, axis: -1)
         var k = SAOps.toHeads(kv[0], B, M, H, D)
@@ -65,7 +78,7 @@ public struct SADiT {
         x = h + x
         x = x + crossAttn(SAOps.rmsNorm(x, W(p + "xnorm_g"), eps: 1e-5), ctx, p)
         var le = mlp(local, p + "loc0", p + "loc2", bias: true)          // (B,T,1024)
-        le = concatenated([MLXArray.zeros([le.dim(0), nMem, 1024]), le], axis: 1)
+        le = concatenated([MLXArray.zeros([le.dim(0), nMem, embedDim]), le], axis: 1)
         x = x + le
         let res = x
         h = SAOps.rmsNorm(x, W(p + "ffnorm_g"), eps: 1e-5) * (1 + ss[3]) + ss[4]
@@ -94,10 +107,10 @@ public struct SADiT {
 
         var h = conv1x1(x, W("pre_conv")) + x                           // (B,256,T)
         h = SAOps.linear(h.transposed(axes: [0, 2, 1]), W("project_in.w"))  // (B,T,1024)
-        let mem = broadcast(W("memory_tokens").expandedDimensions(axis: 0), to: [B, nMem, 1024])
+        let mem = broadcast(W("memory_tokens").expandedDimensions(axis: 0), to: [B, nMem, embedDim])
         h = concatenated([mem, h], axis: 1)                             // (B,T+64,1024)
         let freqs = SAOps.ropeFreqs(h.dim(1), dim: 32)
-        for i in 0 ..< 20 { h = block(h, "L\(i).", ctx, freqs, gc, local, nMem) }
+        for i in 0 ..< depth { h = block(h, "L\(i).", ctx, freqs, gc, local, nMem) }
         h = split(h, indices: [nMem], axis: 1)[1]                       // drop memory
         h = SAOps.linear(h, W("project_out.w")).transposed(axes: [0, 2, 1]) // (B,256,T)
         return conv1x1(h, W("post_conv")) + h
