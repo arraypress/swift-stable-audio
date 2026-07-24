@@ -12,10 +12,10 @@
 import Foundation
 import MLX
 
-struct SADecoder {
+public struct SADecoder {
 
-    /// Clean-keyed weights (see the name map used at load time).
     let w: [String: MLXArray]
+    public init(w: [String: MLXArray]) { self.w = w }
     private func W(_ k: String) -> MLXArray { w[k]! }
 
     // MARK: - Transformer block (differential attention, DyT, RoPE, SwiGLU)
@@ -99,7 +99,7 @@ struct SADecoder {
     // MARK: - Full decode
 
     /// `latent`: (1, 256, T) -> audio (1, 2, T*4096).
-    func decode(_ latent: MLXArray) -> MLXArray {
+    public func decode(_ latent: MLXArray) -> MLXArray {
         let T = latent.dim(2)
         let z = latent * W("running_std")
         var x = SAOps.linear(z.transposed(axes: [0, 2, 1]), W("lin_w"), bias: W("lin_b")) // (1,T,768)

@@ -11,9 +11,10 @@
 import Foundation
 import MLX
 
-struct SAT5Gemma {
+public struct SAT5Gemma {
 
     let w: [String: MLXArray]
+    public init(w: [String: MLXArray]) { self.w = w }
     private func W(_ k: String) -> MLXArray { w[k]! }
     private static let H = 12, D = 64
 
@@ -45,7 +46,7 @@ struct SAT5Gemma {
     }
 
     /// `ids`: (1, n) token ids, `mask`: (1, n) 1/0. -> (1, n, 768) embeddings.
-    func encode(_ ids: MLXArray, _ mask: MLXArray) -> MLXArray {
+    public func encode(_ ids: MLXArray, _ mask: MLXArray) -> MLXArray {
         let n = ids.dim(1)
         var x = W("embed_tokens")[ids] * Float(768.0).squareRoot()
         let freqs = SAOps.ropeFreqs(n, dim: 64)

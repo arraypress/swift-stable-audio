@@ -35,5 +35,14 @@ let package = Package(
             name: "StableAudioKitTests",
             dependencies: ["StableAudioKit"]
         ),
+        // Offline numeric validator for the MLX Swift nets (run with the
+        // metallib colocated). Not part of the shipped products.
+        .executableTarget(
+            name: "sa-validate",
+            dependencies: [
+                "StableAudioKitMLX",
+                .product(name: "MLX", package: "mlx-swift"),
+            ]
+        ),
     ]
 )

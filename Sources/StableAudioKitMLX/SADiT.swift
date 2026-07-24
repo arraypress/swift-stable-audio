@@ -11,9 +11,10 @@
 import Foundation
 import MLX
 
-struct SADiT {
+public struct SADiT {
 
     let w: [String: MLXArray]
+    public init(w: [String: MLXArray]) { self.w = w }
     private func W(_ k: String) -> MLXArray { w[k]! }
 
     private func lin(_ x: MLXArray, _ p: String, bias: Bool) -> MLXArray {
@@ -83,7 +84,7 @@ struct SADiT {
     // MARK: - Forward
 
     /// `x`: (1,256,T), `t`: (1,), conds -> velocity (1,256,T).
-    func forward(_ x: MLXArray, _ t: MLXArray, _ ctxRaw: MLXArray, _ globalRaw: MLXArray, _ localRaw: MLXArray) -> MLXArray {
+    public func forward(_ x: MLXArray, _ t: MLXArray, _ ctxRaw: MLXArray, _ globalRaw: MLXArray, _ localRaw: MLXArray) -> MLXArray {
         let B = x.dim(0), nMem = 64
         let ctx = mlp(ctxRaw, "cond_embed0", "cond_embed2", bias: false)
         var glob = mlp(globalRaw, "glob_embed0", "glob_embed2", bias: false)
