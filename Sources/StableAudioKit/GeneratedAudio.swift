@@ -82,13 +82,17 @@ extension GeneratedAudio {
             for c in 0 ..< ch { s[f * ch + c] = samples[f * ch + c] }
         }
         // First `xf` samples blend the head (fading in) with the removed tail
-        // (fading out), so the wrap point outLen-1 -> 0 is continuous.
+        // (fading out), so the wrap point outLen-1 -> 0 is continuous. Use an
+        // equal-POWER curve (sin/cos): for uncorrelated texture the two gains
+        // satisfy gh^2 + gt^2 = 1, so loudness stays constant across the seam
+        // instead of dipping ~6 dB at the midpoint (the linear-crossfade "pulse").
         for i in 0 ..< xf {
-            let g = Float(i) / Float(xf)
+            let t = (Float(i) + 0.5) / Float(xf) * (.pi / 2)
+            let gh = sin(t), gt = cos(t)
             for c in 0 ..< ch {
                 let head = samples[i * ch + c]
                 let tail = samples[(outLen + i) * ch + c]
-                s[i * ch + c] = head * g + tail * (1 - g)
+                s[i * ch + c] = head * gh + tail * gt
             }
         }
         return GeneratedAudio(samples: s, sampleRate: sampleRate, channelCount: ch)

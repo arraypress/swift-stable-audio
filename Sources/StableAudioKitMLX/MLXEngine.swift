@@ -127,26 +127,47 @@ public final class MLXEngine: AudioGenEngine, @unchecked Sendable {
         let idsMLX = MLXArray(idsPadded.map { Int32($0) }).reshaped([1, promptLength])
         let maskMLX = MLXArray(mask).reshaped([1, promptLength])
 
-        // Latent length. Like the reference pipeline, we render a few seconds
-        // MORE than requested and crop back — the model puts a tone artifact on
-        // its final frame, so generating margin frames pushes that artifact into
-        // the discarded tail instead of the audible clip end.
-        let seconds = Float(min(max(options.seconds, 1), model.maxSeconds))
+        // How many output samples to keep. For a musical loop we snap to an
+        // exact whole number of bars at the requested BPM so the loop point
+        // lands on a downbeat; `seamlessLoop` then trims the short de-click
+        // crossfade back to exactly `loopSamples`.
+        let reqSeconds = Double(min(max(options.seconds, 1), model.maxSeconds))
+        var keepSamples = Int((reqSeconds * Double(sampleRate)).rounded())
+        var barLockedXfMs: Double?
+        if options.loop, let bpm = options.loopBPM, bpm > 20 {
+            let barSec = 4.0 * 60.0 / bpm                       // 4 beats / bar
+            let bars = max(1.0, (reqSeconds / barSec).rounded())
+            let loopSamples = Int((bars * barSec * Double(sampleRate)).rounded())
+            let xf = Int((0.012 * Double(sampleRate)).rounded())   // 12 ms de-click
+            keepSamples = loopSamples + xf
+            barLockedXfMs = 12
+        }
+
+        // Like the reference pipeline, render a few seconds MORE than we keep and
+        // crop back — the model puts a tone artifact on its final frame, so the
+        // margin frames push that artifact into the discarded tail.
+        let condSeconds = Float(Double(keepSamples) / Double(sampleRate))
         let margin: Float = 3
-        var frames = Int(((seconds + margin) * Float(sampleRate) / Float(downsample)).rounded())
+        var frames = Int(((condSeconds + margin) * Float(sampleRate) / Float(downsample)).rounded())
         frames = max(2, frames + (frames & 1))          // round up to even
 
         let audio = pipeline.generate(
-            ids: idsMLX, mask: maskMLX, seconds: seconds,
+            ids: idsMLX, mask: maskMLX, seconds: condSeconds,
             frames: frames, seed: UInt64(max(0, options.seed ?? 0)))
         eval(audio)
 
-        // (1, 2, Nfull) -> crop to the requested duration -> interleaved [Float].
-        let keep = min(audio.dim(2), Int((seconds * Float(sampleRate)).rounded()))
+        // (1, 2, Nfull) -> crop to the kept length -> interleaved [Float].
+        let keep = min(audio.dim(2), keepSamples)
         let stereoNT = audio[0].transposed(axes: [1, 0])[0 ..< keep]   // (keep, 2)
         let interleaved = stereoNT.reshaped([keep * 2]).asArray(Float.self)
-        // Tiny de-click fade only; the end-tone lives in the cropped-off tail.
         let clean = GeneratedAudio(samples: interleaved, sampleRate: sampleRate, channelCount: 2)
-        return options.loop ? clean.seamlessLoop() : clean.faded(inMs: 5, outMs: 8)
+
+        if let xfMs = barLockedXfMs {
+            return clean.seamlessLoop(crossfadeMs: xfMs)   // exact-bar musical loop
+        } else if options.loop {
+            return clean.seamlessLoop()                    // texture loop (long blend)
+        } else {
+            return clean.faded(inMs: 5, outMs: 8)          // one-shot, de-click only
+        }
     }
 }

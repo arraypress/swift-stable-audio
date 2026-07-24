@@ -30,13 +30,20 @@ public struct GenerationOptions: Sendable, Equatable {
     /// steady content — rain, wind, fire, drones, pads.
     public var loop: Bool
 
+    /// Tempo for a *musical* loop. When set together with `loop`, the clip is
+    /// cropped to an exact whole number of bars at this BPM so the loop point
+    /// lands on a downbeat, and only a short de-click crossfade is applied (a
+    /// long blend would smear the beat). `nil` → texture loop (long crossfade).
+    public var loopBPM: Double?
+
     public init(
         seconds: Double = 10,
         steps: Int? = nil,
         cfgScale: Double? = nil,
         seed: Int? = nil,
         negativePrompt: String? = nil,
-        loop: Bool = false
+        loop: Bool = false,
+        loopBPM: Double? = nil
     ) {
         self.seconds = seconds
         self.steps = steps
@@ -44,6 +51,7 @@ public struct GenerationOptions: Sendable, Equatable {
         self.seed = seed
         self.negativePrompt = negativePrompt
         self.loop = loop
+        self.loopBPM = loopBPM
     }
 
     /// Resolve the effective parameters against a model's defaults and limits.
