@@ -44,5 +44,14 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
             ]
         ),
+        // End-to-end text -> audio driver (fixed-ids tokenizer stub).
+        .executableTarget(
+            name: "sa-generate",
+            dependencies: [
+                "StableAudioKit",
+                "StableAudioKitMLX",
+                .product(name: "MLX", package: "mlx-swift"),
+            ]
+        ),
     ]
 )
