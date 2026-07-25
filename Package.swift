@@ -69,8 +69,17 @@ let package = Package(
             dependencies: ["StableAudioKitGemma"]
         ),
         // Real text -> audio: Gemma tokenizer + MLXEngine, any typed prompt.
+        // (Named sa-audio, not sa-tts — text-to-AUDIO, not speech.)
         .executableTarget(
-            name: "sa-tts",
+            name: "sa-audio",
+            dependencies: [
+                "StableAudioKit", "StableAudioKitMLX", "StableAudioKitGemma",
+                .product(name: "MLX", package: "mlx-swift"),
+            ]
+        ),
+        // Batch loopable-SFX generator (model picked from weights filename).
+        .executableTarget(
+            name: "sa-sfx",
             dependencies: [
                 "StableAudioKit", "StableAudioKitMLX", "StableAudioKitGemma",
                 .product(name: "MLX", package: "mlx-swift"),
