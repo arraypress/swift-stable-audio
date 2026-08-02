@@ -56,15 +56,16 @@ python3 Tools/tempo.py out/*.wav
 `tempo.py`'s confidence figure is **not** a "is there a beat" score — see its
 docstring. A beatless pad measures higher than a real drum pattern.
 
-## Missing: the quantizer
+## `quantize.py` — recovered, and not the one that made the weights
 
-The `sa3-*.safetensors` weights in `~/StableAudioModels/` are 8-bit quantized
-(`quant.bits = 8`, `quant.group = 64`), but `convert_stream.py` only emits
-fp32. **The tool that quantized them no longer exists** — not here, not in
-`Sources/`, not on disk. `MLXEngine` dequantizes at load and has no quantize
-path.
+Recovered from a session transcript on 2026-08-02; the original lived in a
+scratchpad and was wiped. **It produces 4-bit, and the shipped weights are
+8-bit.** CLAUDE.md records 4-bit as audibly degraded for this model, and the
+script omits the `quant.bits` / `quant.group` tensors `MLXEngine` requires, so
+its output will not load correctly as-is. It also needs `mlx` and
+`safetensors`, which the other tools here deliberately do not.
 
-So those weight files cannot currently be regenerated from the checkpoint, and
-should be treated as irreplaceable until a quantizer is written. It was most
-likely lost with the other scratchpad scripts in the 2026-07-25 crash; if so,
-it is recoverable from the session transcripts of that work.
+Read its docstring before running it. Reconstituting the 8-bit production
+quantizer is three small changes plus an A/B against an fp32 reference — until
+that is done, the `sa3-*.safetensors` files cannot be regenerated and should
+be treated as irreplaceable.
