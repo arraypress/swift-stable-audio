@@ -54,10 +54,11 @@ sa-audio <tokDir> <weights> <out.wav> <prompt> [seconds] [loop|bpm|none] [seed]
 - Arg 7 = seed. **Generation is fully deterministic** — same prompt + seed → byte-identical file. Varying the seed is the *only* way to get different takes of one prompt.
 
 ## Weight conversion
-Use **`~/StableAudioModels/convert_stream.py`** (durable, outside this repo):
+Use **`Tools/convert_stream.py`** (in this repo — see `Tools/README.md`):
 ```bash
-python3 convert_stream.py <hf-snapshot-dir> <out.safetensors> [--dry-run]
+python3 Tools/convert_stream.py <hf-snapshot-dir> <out.safetensors> [--dry-run]
 ```
+Was `~/StableAudioModels/convert_stream.py`, which was unversioned. That copy still exists and is identical; this one is now canonical.
 **numpy + stdlib only — no torch, no stable-audio-tools, no venv.** Streams tensor-by-tensor off disk, so peak RAM is the largest single tensor (786 MB, the T5 embed table) rather than the old `get_pretrained_model()` route's ~2× model size (~20 GB — this is what crashed the Mac). Medium converts in <20 s → 880 tensors / 8.64 GB fp32. Handles bf16→f32 (T5Gemma is BF16) and the weight-norm mapping conv (`g·v/‖v‖`).
 
 **Gotcha:** the six front-of-decoder tensors need the `dec.` prefix (`dec.map_weight`, `map_bias`, `new_tokens`, `lin_w`, `lin_b`, `running_std`) — `MLXEngine` routes via `sub("dec.")` and won't see them bare. `num_w`/`num_b`/`padding_embedding` stay unprefixed.
@@ -66,6 +67,7 @@ python3 convert_stream.py <hf-snapshot-dir> <out.safetensors> [--dry-run]
 - **End-of-clip tone:** the model marks its final latent frame. `MLXEngine` generates `seconds + 3s` of frames and crops back to `seconds` so the artifact is discarded (mirrors the reference pipeline). Do NOT "fix" this by trimming/fading the output — that eats real content.
 - **Loops:** `options.loop` → equal-power texture crossfade; `options.loopBPM` → crop to a whole number of bars at that tempo (downbeat-aligned) + 12 ms de-click. The model isn't tempo-locked, so bar-cropping is a safety net, not a guarantee.
 - **Quantization:** 8-bit (`quant.bits` metadata) is near-lossless (0.98 correlation vs fp32, confirmed by ear) and dequantizes to fp16 at load. **4-bit is audibly degraded** for this diffusion model (0.15 correlation) — the 8 sampling steps compound weight error. Don't ship it.
+- **No quantizer exists.** The shipped `sa3-*.safetensors` are 8-bit (`quant.bits = 8`, `quant.group = 64`), but `convert_stream.py` only emits fp32 and `MLXEngine` only *de*quantizes. Whatever produced them is not in this repo, not in `Tools/`, and not on disk — almost certainly lost in the 2026-07-25 crash. **Those weight files therefore cannot be regenerated and are irreplaceable.** Writing a quantizer (or recovering it from that session's transcripts) is the fix.
 - Frames `T = round(seconds · 44100 / 4096)`, rounded even.
 
 ## Port validation (reference numbers)
@@ -93,11 +95,12 @@ The user judges **small (0.6 B) not good enough — medium (2 B) is the minimum 
 - **Landscape re-scouted 2026-07-24:** SA3 (released ~May 2026) is current; nothing newer to migrate to. The "459 M vs 0.6 B" confusion is DiT-only vs full-stack count — same models. Vocals gap → cloud (`RemoteEngine`) is the pragmatic path.
 
 ## ⚠️ Never put irreplaceable artifacts in the scratchpad
-Session scratchpads live under `/private/tmp/claude-501/<session-id>/` and are **wiped on reboot**. A machine crash on 2026-07-25 destroyed the MLX-Python venv, the `mlx_*.py` reference ports, the `dump_*`/`export_*` fixture scripts, and the fixtures directory. They're recoverable only by extracting Write-tool contents from session transcripts. Durable assets that survived: `~/StableAudioModels/` (converted weights + `tokenizer/` + `convert_stream.py`), this git repo, and the built binaries with their colocated `mlx.metallib`.
+Session scratchpads live under `/private/tmp/claude-501/<session-id>/` and are **wiped on reboot**. A machine crash on 2026-07-25 destroyed the MLX-Python venv, the `mlx_*.py` reference ports, the `dump_*`/`export_*` fixture scripts, and the fixtures directory. They're recoverable only by extracting Write-tool contents from session transcripts. Durable assets that survived: `~/StableAudioModels/` (quantized weights + `tokenizer/`), this git repo, and the built binaries with their colocated `mlx.metallib`. **The four Python tools are now in `Tools/` and versioned** — they were the remaining unbacked-up work.
 
 ## Local assets (not in the repo)
-- Converted weights, tokenizer, and `convert_stream.py`: `~/StableAudioModels/`.
-- fp32 reference for 8-bit A/B: `~/Documents/stable/weights/sa3_medium_fp32.safetensors`.
+- Quantized weights + tokenizer: `~/StableAudioModels/`. **Not reproducible** — see the quantizer note above. `tokenizer/` alone is replaceable: identical files ship in the HF snapshot under `t5gemma-b-b-ul2/`.
+- HF source snapshot (conversion input): `~/.cache/huggingface/hub/models--stabilityai--stable-audio-3-medium` (9.7 GB). Only *medium* is cached — the `sa3-small-music` / `sa3-small-sfx` sources are gone, so those two would need re-downloading.
+- ~~fp32 reference for 8-bit A/B: `~/Documents/stable/weights/sa3_medium_fp32.safetensors`~~ — **gone**, verified 2026-08-02. Regenerate with `Tools/convert_stream.py` if an A/B is needed again (8.64 GB).
 - Companion app: `../../swift-stable-audio-tester` (xcodegen; `xcodegen generate && xcodebuild ...`).
 
 ## Open direction
