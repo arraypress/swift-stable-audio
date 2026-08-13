@@ -13,8 +13,12 @@ swift build --product sa-audio  # typed prompt → WAV
 MLX-Swift can't run via `swift build`/`swift test` here — the Metal library only bundles in Xcode **app** builds. To run any executable (`sa-audio`, `sa-generate`, `sa-validate`) headless, colocate the metallib next to the binary:
 ```bash
 cp <path-to-mlx-python>/site-packages/mlx/lib/mlx.metallib \
-   .build/arm64-apple-macosx/debug/mlx.metallib
+   "$(swift build --show-bin-path)/mlx.metallib"
 ```
+The bin path is **not** `.build/arm64-apple-macosx/debug` on the current
+toolchain — it is `.build/out/Products/Debug`. Ask for it rather than writing
+it down, or the copy silently lands nowhere and the binary dies looking for
+Metal.
 Xcode app builds (the StableAudioTester companion) bundle the metallib automatically — nothing to do there.
 
 ## ⚠️ Memory footprint — this crashed the machine once
@@ -29,7 +33,19 @@ Measured **peak memory footprint** for one *medium* clip on a 36 GB Mac:
 | 20 s | 14.6 GB |
 | 30 s | 17.2 GB |
 
-Roughly **7.7 GB fixed + 0.32 GB per second of audio**. The fixed base is the 8-bit weights dequantised to a full fp16 copy at load; the growth is the medium decoder's O(seq²) band attention. A 30 s clip generates in ~6 s.
+Roughly **7.7 GB fixed + 0.32 GB per second of audio**.
+
+The **small** models are about half that — measured on the same machine with
+`sa3-small-sfx`:
+
+| Clip length | Peak |
+|---|---|
+| 5 s | 4.6 GB |
+| 15 s | 6.3 GB |
+
+Roughly **3.8 GB fixed + 0.17 GB per second**. A 120 s small clip therefore
+extrapolates to ~24 GB, which is still most of a 36 GB machine — the small
+models are cheaper, not cheap. The fixed base is the 8-bit weights dequantised to a full fp16 copy at load; the growth is the medium decoder's O(seq²) band attention. A 30 s clip generates in ~6 s.
 
 - **`ps` RSS is useless here — it reads ~1.2 GB for a 17.2 GB job**, because MLX's unified-memory GPU buffers don't count toward RSS. Always measure with `/usr/bin/time -l` and read "peak memory footprint".
 - **Run generation strictly sequentially.** Two 30 s clips in parallel ≈ 35 GB ≈ the whole machine. Never run a weight conversion concurrently with generation. ~60 s clips extrapolate to ~27 GB — don't attempt alongside anything.
