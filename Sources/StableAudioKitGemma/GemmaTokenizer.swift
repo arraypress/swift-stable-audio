@@ -3,13 +3,13 @@
 //  StableAudioKitGemma
 //
 //  A `SATokenizer` backed by swift-transformers' Gemma tokenizer, so an app can
-//  feed arbitrary text prompts to `MLXEngine`. Load once (async) from the
+//  feed arbitrary text prompts to `MLXEngine` or `CoreAIEngine`. Load once (async) from the
 //  model's `t5gemma-b-b-ul2` tokenizer files, then encode synchronously.
 //
 
 import Foundation
 import Tokenizers
-import StableAudioKitMLX
+import StableAudioKit
 
 /// Gemma tokenizer wrapper. `@unchecked Sendable`: the underlying tokenizer is
 /// used read-only after construction.

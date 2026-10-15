@@ -1,11 +1,12 @@
 # CLAUDE.md — swift-stable-audio
 
-On-device text-to-audio (SFX + music) for macOS/iOS. Module: **StableAudioKit**. MLX-first, one API + a model registry + engines behind a protocol (same shape as swift-llm / swift-tts).
+On-device text-to-audio (SFX + music) for macOS/iOS. Module: **StableAudioKit**. One API + a model registry + engines behind a protocol (same shape as swift-llm / swift-tts): **Core AI** (`CoreAIEngine`, the published `.aimodel` exports — what sfx runs since 0.3.0), **MLX** (`MLXEngine`, also iPhone, locally converted weights) and cloud.
 
 ## Build & test
 ```bash
 swift build                     # all products
-swift test                      # 21 offline unit tests (core only — no GPU/MLX)
+swift test                      # 31 offline unit tests (core only — no GPU/MLX/Core AI)
+swift build -c release --product sa-coreai   # Core AI: info / generate / parity
 swift build --product sa-audio  # typed prompt → WAV
 ```
 
@@ -57,10 +58,19 @@ models are cheaper, not cheap. The fixed base is the 8-bit weights dequantised t
 3. **Negation is unreliable** — "no drums" may add drums. (ACE-Step respects negation; SA3 does not.)
 4. **SA3 is a texture engine.** Best at continuous stationary ambience, industrial/sci-fi texture, sustained tonal beds, wordless vocal timbre, struck-and-decaying resonance. Worst at tempo (there is *no* tempo conditioning — only text + duration), musical structure, lyrics, and change-over-time. Short designed one-shots (clicks, foley) are weaker but usable.
 
+## Core AI engine (1.2.0)
+- Exports: `arraypress/stable-audio-3-{small-sfx,small-music,medium}-coreai` on HF (public, the user's). Functions are `condition`, `denoise` (dynamic batch + length), `decode_N`/`encode_N` for N in 256…4096 (medium 256…2048) — the README's `conditioner`/`dit`/`decoder_N` names are WRONG, example.py's are right (checked with `sa-coreai info`). `cross_attn_mask` is float32.
+- **Parity: bit-identical to example.py** (all stages max|Δ| 0 with the same numpy noise); with CFG 3 + negative 82.5 dB (example.py's `guide` sees a float32 latent on step 0). Keep the host maths in float64 or parity goes.
+- Window ≥ 256 frames (23.8 s), +3 s margin, conditioner told the WINDOW's seconds (training used 23.78 for everything; telling it 2 s puts the loss ×10⁴ — `LLM Training/Code/stable-audio/lora/prepare_captioned.py`). 258 frames needs the 512 rung — cost, not a bug.
+- Core AI compiles the WHOLE asset (every rung, encoders included) on first load per executable: small-sfx 15–20 min and 6.5 GB of `~/Library/Caches/coreai-cache/<build>/<program>/<main.hash hex>`. Every new program name (test runner, probe, python) pays it again — delete stale entries.
+- Memory flat ~3 GB for small at 2–120 s (MLX: 4.5→9.6 GB). First clip in a process 4–7 s (warm-up, mostly the first decode), later clips 1.0 s.
+- No CFG without a negative in example.py; here cfg > 1 without one guides against zeros (the reference's null embed).
+
 ## Module map
-- `StableAudioKit/` — `StableAudioModel` (registry), `GenerationOptions`, `GeneratedAudio` (WAV + `trimmingEnd`/`faded`/`seamlessLoop`), `RemoteEngine`, `AudioGenEngine` protocol.
+- `StableAudioKit/` — `StableAudioModel` (registry), `GenerationOptions`, `GeneratedAudio` (WAV + `trimmingEnd`/`faded`/`seamlessLoop`), `RemoteEngine`, `AudioGenEngine` protocol, `SATokenizer`, `Support/` (`PingPongSampler`, `GaussianNoise`, `ClipPlan` — shared by both engines).
+- `StableAudioKitCoreAI/` — `CoreAIEngine` + `Tensors` (NDArray in/out, any strides).
 - `StableAudioKitMLX/` — `MLXEngine` + ported nets: `SADiT`, `SADecoder`, `SAT5Gemma`, `SAPipeline` (ping-pong sampler), `MLXOps` (shared primitives). `SADiT`/`SADecoder` **infer dims from the weights** → one codebase runs small + medium.
-- `StableAudioKitGemma/` — `GemmaTokenizer` (swift-transformers `AutoTokenizer`). App injects it via the `SATokenizer` protocol.
+- `StableAudioKitGemma/` — `GemmaTokenizer` (swift-transformers `AutoTokenizer`). App injects it via the `SATokenizer` protocol (in the core since 1.2.0; `StableAudioKitMLX` re-exports the core so old imports still compile).
 
 ## `sa-audio` CLI
 ```

@@ -15,6 +15,9 @@ let package = Package(
         .library(name: "StableAudioKitMLX", targets: ["StableAudioKitMLX"]),
         // Gemma tokenizer (swift-transformers) — opt-in.
         .library(name: "StableAudioKitGemma", targets: ["StableAudioKitGemma"]),
+        // On-device Stable Audio via Apple's Core AI (.aimodel exports) — opt-in.
+        // Its types are macOS 27 / iOS 27; the package floor stays at 26.
+        .library(name: "StableAudioKitCoreAI", targets: ["StableAudioKitCoreAI"]),
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.31.6")),
@@ -33,6 +36,12 @@ let package = Package(
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXRandom", package: "mlx-swift"),
             ]
+        ),
+        // Core AI: the published .aimodel exports, no MLX. Every type is
+        // @available(macOS 27, iOS 27), so the package floor does not move.
+        .target(
+            name: "StableAudioKitCoreAI",
+            dependencies: ["StableAudioKit"]
         ),
         .testTarget(
             name: "StableAudioKitTests",
@@ -60,7 +69,7 @@ let package = Package(
         .target(
             name: "StableAudioKitGemma",
             dependencies: [
-                "StableAudioKitMLX",
+                "StableAudioKit",
                 .product(name: "Tokenizers", package: "swift-transformers"),
             ]
         ),
@@ -76,6 +85,12 @@ let package = Package(
                 "StableAudioKit", "StableAudioKitMLX", "StableAudioKitGemma",
                 .product(name: "MLX", package: "mlx-swift"),
             ]
+        ),
+        // Core AI driver: generate, time, and dump stages for the parity check
+        // against the export's example.py.
+        .executableTarget(
+            name: "sa-coreai",
+            dependencies: ["StableAudioKit", "StableAudioKitCoreAI", "StableAudioKitGemma"]
         ),
         // Batch loopable-SFX generator (model picked from weights filename).
         .executableTarget(

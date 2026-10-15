@@ -17,13 +17,9 @@
 
 import Foundation
 import MLX
-import StableAudioKit
-
-/// Supplies Gemma token ids for a prompt (fulfil with swift-transformers in the app).
-public protocol SATokenizer: Sendable {
-    /// Encode to token ids (BOS-prefixed, as the T5Gemma conditioner expects).
-    func encode(_ text: String) -> [Int]
-}
+// Re-exported so `SATokenizer` (in the core since 1.2.0) is still in scope
+// for code that imports only this module.
+@_exported import StableAudioKit
 
 /// On-device text-to-audio via the MLX Stable Audio 3 small-sfx model.
 public final class MLXEngine: AudioGenEngine, @unchecked Sendable {
@@ -127,21 +123,10 @@ public final class MLXEngine: AudioGenEngine, @unchecked Sendable {
         let idsMLX = MLXArray(idsPadded.map { Int32($0) }).reshaped([1, promptLength])
         let maskMLX = MLXArray(mask).reshaped([1, promptLength])
 
-        // How many output samples to keep. For a musical loop we snap to an
-        // exact whole number of bars at the requested BPM so the loop point
-        // lands on a downbeat; `seamlessLoop` then trims the short de-click
-        // crossfade back to exactly `loopSamples`.
-        let reqSeconds = Double(min(max(options.seconds, 1), model.maxSeconds))
-        var keepSamples = Int((reqSeconds * Double(sampleRate)).rounded())
-        var barLockedXfMs: Double?
-        if options.loop, let bpm = options.loopBPM, bpm > 20 {
-            let barSec = 4.0 * 60.0 / bpm                       // 4 beats / bar
-            let bars = max(1.0, (reqSeconds / barSec).rounded())
-            let loopSamples = Int((bars * barSec * Double(sampleRate)).rounded())
-            let xf = Int((0.012 * Double(sampleRate)).rounded())   // 12 ms de-click
-            keepSamples = loopSamples + xf
-            barLockedXfMs = 12
-        }
+        // How many samples to keep, and how to finish them (shared with the
+        // Core AI engine): a musical loop is snapped to whole bars.
+        let plan = ClipPlan(options: options, maxSeconds: model.maxSeconds, sampleRate: sampleRate)
+        let keepSamples = plan.keepFrames
 
         // Like the reference pipeline, render a few seconds MORE than we keep and
         // crop back — the model puts a tone artifact on its final frame, so the
@@ -163,14 +148,6 @@ public final class MLXEngine: AudioGenEngine, @unchecked Sendable {
         let keep = min(audio.dim(2), keepSamples)
         let stereoNT = audio[0].transposed(axes: [1, 0])[0 ..< keep]   // (keep, 2)
         let interleaved = stereoNT.reshaped([keep * 2]).asArray(Float.self)
-        let clean = GeneratedAudio(samples: interleaved, sampleRate: sampleRate, channelCount: 2, seed: seed)
-
-        if let xfMs = barLockedXfMs {
-            return clean.seamlessLoop(crossfadeMs: xfMs)   // exact-bar musical loop
-        } else if options.loop {
-            return clean.seamlessLoop()                    // texture loop (long blend)
-        } else {
-            return clean.faded(inMs: 5, outMs: 8)          // one-shot, de-click only
-        }
+        return plan.finish(GeneratedAudio(samples: interleaved, sampleRate: sampleRate, channelCount: 2, seed: seed))
     }
 }
