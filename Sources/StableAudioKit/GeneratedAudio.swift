@@ -20,10 +20,16 @@ public struct GeneratedAudio: Sendable, Equatable {
     /// Number of interleaved channels (1 = mono, 2 = stereo).
     public let channelCount: Int
 
-    public init(samples: [Float], sampleRate: Int, channelCount: Int) {
+    /// The seed the engine generated with — the one asked for, or the random
+    /// one it drew. `nil` from an engine with no seed to report (a cloud
+    /// one). The post-processing below carries it through.
+    public var seed: Int?
+
+    public init(samples: [Float], sampleRate: Int, channelCount: Int, seed: Int? = nil) {
         self.samples = samples
         self.sampleRate = sampleRate
         self.channelCount = channelCount
+        self.seed = seed
     }
 
     /// Frames per channel.
@@ -46,7 +52,7 @@ extension GeneratedAudio {
         guard ch > 0 else { return self }
         let drop = min(Int(ms / 1000 * Double(sampleRate)), frameCount)
         let keep = max(0, frameCount - drop) * ch
-        return GeneratedAudio(samples: Array(samples[0 ..< keep]), sampleRate: sampleRate, channelCount: ch)
+        return GeneratedAudio(samples: Array(samples[0 ..< keep]), sampleRate: sampleRate, channelCount: ch, seed: seed)
     }
 
     /// Linear fade-in / fade-out (milliseconds) — removes the boundary click or
@@ -66,7 +72,7 @@ extension GeneratedAudio {
             let idx = frameCount - 1 - f
             for c in 0 ..< ch { s[idx * ch + c] *= g }
         }
-        return GeneratedAudio(samples: s, sampleRate: sampleRate, channelCount: ch)
+        return GeneratedAudio(samples: s, sampleRate: sampleRate, channelCount: ch, seed: seed)
     }
 
     /// Turn the clip into a **seamless loop** by equal-gain crossfading the tail
@@ -95,7 +101,7 @@ extension GeneratedAudio {
                 s[i * ch + c] = head * gh + tail * gt
             }
         }
-        return GeneratedAudio(samples: s, sampleRate: sampleRate, channelCount: ch)
+        return GeneratedAudio(samples: s, sampleRate: sampleRate, channelCount: ch, seed: seed)
     }
 }
 

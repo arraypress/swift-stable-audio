@@ -5,12 +5,12 @@ On-device text-to-audio (SFX + music) for macOS/iOS. Module: **StableAudioKit**.
 ## Build & test
 ```bash
 swift build                     # all products
-swift test                      # 14 offline unit tests (core only — no GPU/MLX)
+swift test                      # 21 offline unit tests (core only — no GPU/MLX)
 swift build --product sa-audio  # typed prompt → WAV
 ```
 
-## The MLX metallib gotcha (READ THIS FIRST)
-MLX-Swift can't run via `swift build`/`swift test` here — the Metal library only bundles in Xcode **app** builds. To run any executable (`sa-audio`, `sa-generate`, `sa-validate`) headless, colocate the metallib next to the binary:
+## The MLX metallib (superseded 2026-09-03)
+A plain `swift build` now emits `mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib` beside each binary and MLX loads it from there — so binaries run headless with nothing copied, and a release ships the binary plus that bundle. The old workaround below (a Python `mlx.metallib` beside the binary) still works but is no longer needed:
 ```bash
 cp <path-to-mlx-python>/site-packages/mlx/lib/mlx.metallib \
    "$(swift build --show-bin-path)/mlx.metallib"
@@ -68,12 +68,14 @@ sa-audio <tokDir> <weights> <out.wav> <prompt> [seconds] [loop|bpm|none] [seed]
 ```
 - Arg 6: a **number** = bar-locked musical loop at that BPM; literal **`loop`** = texture loop (long equal-power crossfade, for SFX/ambience); **`none`**/`-` = raw. You need `none` to pass a seed without looping.
 - Arg 7 = seed. **Generation is fully deterministic** — same prompt + seed → byte-identical file. Varying the seed is the *only* way to get different takes of one prompt.
+- **No seed = a random seed** (since 1.1.0): `MLXEngine` draws one per generation from `GenerationOptions.seedRange` and reports it as `GeneratedAudio.seed`. Up to 1.0.0 a nil seed silently meant 0.
 
 ## Weight conversion
 Use **`Tools/convert_stream.py`** (in this repo — see `Tools/README.md`):
 ```bash
-python3 Tools/convert_stream.py <hf-snapshot-dir> <out.safetensors> [--dry-run]
+python3 Tools/convert_stream.py <hf-snapshot-dir> <out.safetensors> [--dry-run] [--source=REPO@REVISION]
 ```
+`--source` writes `source_repository`/`source_revision` into the header's `__metadata__`; `StableAudioWeights.source(of:)` reads them back and sfx records them in recipes. Small-sfx converts too (2026-10-15: 688 tensors, 3.18 GB fp32, from `stabilityai/stable-audio-3-small-sfx@05ca385`).
 Was `~/StableAudioModels/convert_stream.py`, which was unversioned. That copy still exists and is identical; this one is now canonical.
 **numpy + stdlib only — no torch, no stable-audio-tools, no venv.** Streams tensor-by-tensor off disk, so peak RAM is the largest single tensor (786 MB, the T5 embed table) rather than the old `get_pretrained_model()` route's ~2× model size (~20 GB — this is what crashed the Mac). Medium converts in <20 s → 880 tensors / 8.64 GB fp32. Handles bf16→f32 (T5Gemma is BF16) and the weight-norm mapping conv (`g·v/‖v‖`).
 

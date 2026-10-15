@@ -15,11 +15,11 @@ python3 Tools/<script>.py            # every script prints its own usage
 
 ## `convert_stream.py`
 
-Converts a HuggingFace snapshot of `stabilityai/stable-audio-3-medium` into
+Converts a HuggingFace snapshot of any Stable Audio 3 model (`stabilityai/stable-audio-3-medium`, `-small-sfx`, `-small-music`) into
 the MLX-format safetensors that `MLXEngine` loads.
 
 ```bash
-python3 Tools/convert_stream.py <snapshot_dir> <out.safetensors> [--dry-run]
+python3 Tools/convert_stream.py <snapshot_dir> <out.safetensors> [--dry-run] [--source=REPO@REVISION]
 ```
 
 Streams tensor-by-tensor off disk, so peak memory is one tensor — 786 MB, the
@@ -30,6 +30,16 @@ fp32.
 
 `--dry-run` reports tensor count, output size and peak tensor without writing,
 which is the cheap way to confirm a snapshot is intact.
+
+`--source=REPO@REVISION` records where the snapshot came from in the output's
+`__metadata__` (`source_repository`, `source_revision`);
+`StableAudioWeights.source(of:)` reads it back, and `sfx` writes it into every
+recipe. Any SA3 snapshot converts — small-sfx is 688 tensors, 3.18 GB fp32:
+
+```bash
+python3 Tools/convert_stream.py <snapshot> sa3-small-sfx.safetensors \
+    --source=stabilityai/stable-audio-3-small-sfx@05ca3857881c94a2b84026b1111c537d78f5f9f0
+```
 
 The output key names are a contract with `MLXEngine` — it looks tensors up by
 exact string, so a rename here is a silent load failure there. Two traps are

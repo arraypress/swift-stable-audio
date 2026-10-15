@@ -10,11 +10,16 @@ Dependencies are numpy and the standard library. No torch, no
 stable-audio-tools, no virtualenv.
 
     python3 convert_stream.py <snapshot_dir> <out.safetensors> [--dry-run]
+                              [--source=stabilityai/stable-audio-3-small-sfx@<revision>]
 
-`snapshot_dir` is a HuggingFace snapshot of `stabilityai/stable-audio-3-medium`,
+`snapshot_dir` is a HuggingFace snapshot of any Stable Audio 3 model,
 containing `model.safetensors` and `t5gemma-b-b-ul2/model.safetensors`.
 `--dry-run` reports the tensor count, output size and peak tensor without
 writing anything, which is the cheap way to confirm a checkpoint is intact.
+`--source=REPO@REVISION` records where the checkpoint came from in the
+file's `__metadata__` (`source_repository`, `source_revision`), so a tool
+can name the exact upstream revision its audio came from — sfx writes it
+into every recipe.
 
 Medium converts in under 20 seconds: 880 tensors, 8.64 GB fp32.
 
@@ -95,7 +100,7 @@ class Reader:
         return a.reshape(entry["shape"])
 
 
-def write_stream(out_path: str, entries: list[Entry]) -> int:
+def write_stream(out_path: str, entries: list[Entry], metadata: dict[str, str] | None = None) -> int:
     """Write tensors to a safetensors file one at a time.
 
     The header only needs each tensor's name, dtype and shape, all of which
@@ -107,11 +112,15 @@ def write_stream(out_path: str, entries: list[Entry]) -> int:
         out_path: Destination file.
         entries: Ordered `(name, shape, producer)`, where `producer()` returns
             the float32 array for that tensor.
+        metadata: Strings for the header's `__metadata__` — where the weights
+            came from, which `StableAudioWeights.source(of:)` reads back.
 
     Returns:
         Total bytes of tensor data written, excluding the header.
     """
     offset, meta = 0, {}
+    if metadata:
+        meta["__metadata__"] = dict(metadata)
 
     for name, shape, _ in entries:
         nbytes = int(np.prod(shape)) * 4
@@ -300,6 +309,14 @@ def build_entries(main: Reader, t5: Reader) -> tuple[list[Entry], int, int, int]
 def main_cli() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     dry = "--dry-run" in sys.argv
+    metadata: dict[str, str] = {}
+    for flag in sys.argv[1:]:
+        if flag.startswith("--source="):
+            repo, _, revision = flag[len("--source="):].partition("@")
+            if not repo or not revision:
+                print("error: --source is REPO@REVISION", file=sys.stderr)
+                return 2
+            metadata = {"source_repository": repo, "source_revision": revision}
 
     if len(args) != 2:
         print(__doc__)
@@ -313,7 +330,7 @@ def main_cli() -> int:
     for path in (main_path, t5_path):
         if not os.path.isfile(path):
             print(f"error: not found: {path}", file=sys.stderr)
-            print(f"is {snap!r} a stable-audio-3-medium snapshot directory?", file=sys.stderr)
+            print(f"is {snap!r} a Stable Audio 3 snapshot directory?", file=sys.stderr)
             return 1
 
     ent, n_dec, n_dit, n_t5 = build_entries(Reader(main_path), Reader(t5_path))
@@ -329,7 +346,7 @@ def main_cli() -> int:
         return 0
 
     print(f"writing {out} ...", flush=True)
-    written = write_stream(out, ent)
+    written = write_stream(out, ent, metadata)
     print(f"done: {out} ({written / 1e9:.2f} GB, {len(ent)} tensors)")
 
     return 0

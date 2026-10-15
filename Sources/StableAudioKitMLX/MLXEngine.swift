@@ -151,16 +151,19 @@ public final class MLXEngine: AudioGenEngine, @unchecked Sendable {
         var frames = Int(((condSeconds + margin) * Float(sampleRate) / Float(downsample)).rounded())
         frames = max(2, frames + (frames & 1))          // round up to even
 
+        // No seed asked for is a random one, not seed 0 — and it is reported
+        // back on the audio, so a take somebody liked can be made again.
+        let seed = options.resolvedSeed()
         let audio = pipeline.generate(
             ids: idsMLX, mask: maskMLX, seconds: condSeconds,
-            frames: frames, seed: UInt64(max(0, options.seed ?? 0)))
+            frames: frames, seed: UInt64(max(0, seed)))
         eval(audio)
 
         // (1, 2, Nfull) -> crop to the kept length -> interleaved [Float].
         let keep = min(audio.dim(2), keepSamples)
         let stereoNT = audio[0].transposed(axes: [1, 0])[0 ..< keep]   // (keep, 2)
         let interleaved = stereoNT.reshaped([keep * 2]).asArray(Float.self)
-        let clean = GeneratedAudio(samples: interleaved, sampleRate: sampleRate, channelCount: 2)
+        let clean = GeneratedAudio(samples: interleaved, sampleRate: sampleRate, channelCount: 2, seed: seed)
 
         if let xfMs = barLockedXfMs {
             return clean.seamlessLoop(crossfadeMs: xfMs)   // exact-bar musical loop

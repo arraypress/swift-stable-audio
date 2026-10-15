@@ -20,7 +20,9 @@ public struct GenerationOptions: Sendable, Equatable {
     /// Classifier-free-guidance scale. `nil` → the model's `defaultCFG`.
     public var cfgScale: Double?
 
-    /// Fixed seed for reproducibility. `nil` → random.
+    /// Fixed seed for reproducibility, in ``seedRange``. `nil` → a random
+    /// one, drawn per generation; the engine reports the seed it used in
+    /// ``GeneratedAudio/seed``, so any take can be made again.
     public var seed: Int?
 
     /// Optional negative prompt (things to steer away from).
@@ -52,6 +54,23 @@ public struct GenerationOptions: Sendable, Equatable {
         self.negativePrompt = negativePrompt
         self.loop = loop
         self.loopBPM = loopBPM
+    }
+
+    /// The seeds an engine draws from when none is given: what fits in an
+    /// unsigned 32-bit integer, so a seed survives JSON and any caller's
+    /// integer type.
+    public static let seedRange: ClosedRange<Int> = 0...Int(UInt32.max)
+
+    /// The seed to generate with: ``seed`` when one was given, otherwise a
+    /// fresh draw from ``seedRange``.
+    public func resolvedSeed() -> Int {
+        var generator = SystemRandomNumberGenerator()
+        return resolvedSeed(using: &generator)
+    }
+
+    /// ``resolvedSeed()`` drawing from `generator` — for tests.
+    public func resolvedSeed<G: RandomNumberGenerator>(using generator: inout G) -> Int {
+        seed ?? Int.random(in: Self.seedRange, using: &generator)
     }
 
     /// Resolve the effective parameters against a model's defaults and limits.

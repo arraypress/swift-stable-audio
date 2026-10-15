@@ -51,6 +51,25 @@ let audio = try await engine.generate(
 try audio.wavData.write(to: url)              // lossless WAV, no extra deps
 ```
 
+**Seeds:** the same prompt, options and seed give byte-identical audio. With no
+seed the engine draws a random one (in `GenerationOptions.seedRange`,
+0–4294967295) for each generation and reports it on the result, so any take
+can be made again:
+
+```swift
+let audio = try await engine.generate(prompt: "loud metallic clang", options: .init(seconds: 3))
+print(audio.seed!)   // e.g. 2918401177 — pass it back as GenerationOptions(seed:) to repeat it
+```
+
+Up to 1.0.0, no seed meant seed 0, so every unseeded run made the same sound.
+
+**Which weights:** generation is deterministic for one weights file, so a
+caller that saves settings to replay later should pin the file too.
+`StableAudioWeights.sha256(of:)` digests it (an 8-bit and an fp32 conversion
+of one revision make different audio), and `StableAudioWeights.source(of:)`
+reads the upstream repository and revision `Tools/convert_stream.py
+--source=REPO@REVISION` records in the safetensors header.
+
 **Loops:**
 ```swift
 // Texture loop (rain, wind, fire, drones) — equal-power tail→head crossfade
@@ -75,16 +94,16 @@ The full Stable Audio 3 pipeline was reverse-engineered from `stable-audio-tools
 
 - **End-of-clip artifact:** the model puts a tone on its final latent frame, so generation renders a few seconds of margin and crops back — the artifact lands in the discarded tail, not the audible clip.
 - **iPhone:** 8-bit quantization (`quant.bits` metadata) is near-lossless and dequantizes to fp16 at load. 4-bit is too aggressive for this diffusion model.
-- **Weights** are converted to a single clean-keyed safetensors via `scratchpad/.../convert_weights.py`; `MLXEngine` splits by prefix (`dit.`/`dec.`/`t5.`) and builds the pipeline.
+- **Weights** are converted to a single clean-keyed safetensors with `Tools/convert_stream.py` (numpy only; `--source=REPO@REVISION` records where they came from); `MLXEngine` splits by prefix (`dit.`/`dec.`/`t5.`) and builds the pipeline. fp32 output loads as-is; 8-bit files (`quant.bits`) dequantize at load.
 
 ## Executables
 
 `sa-tts`, `sa-generate` (text→WAV), `sa-validate` (net-vs-fixture GPU check), `sa-tokenize`. See `Package.swift`.
 
-> **Note:** MLX-Swift needs a Metal library that only ships in Xcode **app** builds. To run the executables headless, colocate `mlx.metallib` next to the binary (see `CLAUDE.md`). The companion **StableAudioTester** Mac app runs the engine with the metallib bundled automatically.
+> **Note:** a plain `swift build` puts `mlx-swift_Cmlx.bundle` (holding MLX's `default.metallib`) beside each binary, and MLX loads it from there — ship the binary together with that bundle. No Xcode and no Python `mlx.metallib` needed (measured 2026-09-03, and again 2026-10-15 with `sfx`).
 
 ## Status
-- ✅ **Core + `RemoteEngine`** — built, 14 offline unit tests.
+- ✅ **Core + `RemoteEngine`** — built, 21 offline unit tests (`swift test`; no GPU, no weights).
 - ✅ **`MLXEngine`** — all three SA3 models generate end-to-end, runtime-validated on GPU; loops, margin-crop, and 8-bit quantization landed.
 - ✅ **`GemmaTokenizer`** — byte-identical token ids to the reference.
 - 🔜 **HF weight download in `prepare()`** (today: load a local converted safetensors) and app-side weight delivery (Background Assets).
